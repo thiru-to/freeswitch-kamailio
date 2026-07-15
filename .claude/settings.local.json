@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(shellcheck -s bash /Users/aingaran/Desktop/freeswitch-kamailio/install-freeswitch.sh)",
+      "Bash(echo \"---exit $?---\")",
+      "Bash(git ls-remote *)"
+    ]
+  }
+}
