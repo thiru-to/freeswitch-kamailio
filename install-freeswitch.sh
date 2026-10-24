@@ -82,14 +82,16 @@ mkdir -p "$SRC_DIR"
 # Installed into /usr rather than /usr/local so pkg-config finds it unambiguously.
 clone_or_update https://github.com/signalwire/libks.git "$SRC_DIR/libks"
 log "Building libks"
-# libks's CMakeLists runs git (for its Debian changelog) in the *current* directory,
-# so configure from inside the checkout or it fails when invoked from a non-repo cwd.
+# Must be an in-source build, run from the checkout (as upstream documents): libks's
+# CMakeLists runs git/gzip in the current directory, writes changelog.Debian to the
+# source dir, then installs changelog.Debian.gz from the binary dir. Those only agree
+# when cwd == source dir == binary dir.
 cd "$SRC_DIR/libks"
-cmake -S "$SRC_DIR/libks" -B "$SRC_DIR/libks/build" \
+cmake . \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_INSTALL_PREFIX=/usr
-cmake --build "$SRC_DIR/libks/build" -j "$JOBS"
-cmake --install "$SRC_DIR/libks/build"
+cmake --build . -j "$JOBS"
+cmake --install .
 ldconfig
 
 ### Install spandsp (the freeswitch fork; its default branch is the one FS wants).
