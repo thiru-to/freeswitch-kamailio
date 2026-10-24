@@ -8,7 +8,7 @@
 #   PREFIX          install prefix                  (default /usr/local/freeswitch)
 #   JOBS            parallel build jobs             (default nproc)
 #   SRC_DIR         where sources are cloned        (default /usr/src)
-#   FS_BRANCH       FreeSWITCH branch/tag           (default v1.11)
+#   FS_BRANCH       FreeSWITCH branch/tag           (default v1.11, the stable release branch; master is dev)
 #   INSTALL_SOUNDS  1 to fetch sounds + music       (default 1)
 
 set -euo pipefail
@@ -41,15 +41,24 @@ clone_or_update() {
         log "Cloning $(basename "$dir")"
         git clone "$url" "$dir"
     fi
+    # A bare fetch never moves the working tree, so a re-run would rebuild stale code.
     if [ -n "$ref" ]; then
-        git -C "$dir" checkout "$ref"
+        # Remote branch: -B resets a stale local branch to the fetched tip. Tag: plain checkout.
+        if git -C "$dir" rev-parse -q --verify "refs/remotes/origin/$ref" >/dev/null; then
+            git -C "$dir" checkout -B "$ref" "origin/$ref"
+        else
+            git -C "$dir" checkout "$ref"
+        fi
+    else
+        git -C "$dir" pull --ff-only
     fi
 }
 
 ### Update the system
 log "Updating system packages"
 apt-get -y update
-apt-get -y upgrade
+# noninteractive alone doesn't answer dpkg conffile prompts; keep existing configs.
+apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade
 
 ### Install the pre-requisite dependencies.
 # libjpeg-dev / libtiff-dev / libncurses-dev are the portable names: the versioned
@@ -58,6 +67,7 @@ apt-get -y upgrade
 log "Installing build dependencies"
 apt-get install -y \
     build-essential cmake automake autoconf libtool libtool-bin git \
+    wget ca-certificates \
     pkg-config libssl-dev zlib1g-dev libncurses-dev \
     libgdbm-dev libdb-dev libcurl4-openssl-dev libtiff-dev \
     libjpeg-dev libsqlite3-dev libpcre2-dev \
@@ -111,7 +121,9 @@ if [ -f modules.conf ]; then
     sed -i 's|^applications/mod_signalwire|#applications/mod_signalwire|' modules.conf
 fi
 
-./configure --prefix="$PREFIX" --disable-dependency-tracking
+# An explicit --prefix turns on the FHS layout ($PREFIX/var/run/freeswitch, $PREFIX/etc/freeswitch, ...);
+# --disable-fhs keeps conf/log/db/run directly under $PREFIX, which the systemd unit below expects.
+./configure --prefix="$PREFIX" --disable-fhs --disable-dependency-tracking
 make -j"$JOBS"
 make install
 
@@ -126,7 +138,7 @@ getent group freeswitch >/dev/null || groupadd --system freeswitch
 getent passwd freeswitch >/dev/null || adduser \
     --quiet --system \
     --home "$PREFIX" --no-create-home \
-    --gecos "FreeSWITCH open source softswitch" \
+    --comment "FreeSWITCH open source softswitch" \
     --ingroup freeswitch \
     freeswitch
 
@@ -175,7 +187,8 @@ EOF
 
 systemctl daemon-reload
 systemctl enable freeswitch
-systemctl start freeswitch
+# restart, not start: on a re-run the old binary would otherwise keep running.
+systemctl restart freeswitch
 
 log "Done. Check status with: systemctl status freeswitch"
 log "Connect to the CLI with: ${PREFIX}/bin/fs_cli"
